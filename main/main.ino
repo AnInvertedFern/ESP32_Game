@@ -13,18 +13,14 @@ struct Ship {
   int speed;
   int maxSpeed;
   int health;
+  char selfSymbol;
 };
 
-Ship MyShip{(xSize / 2), (ySize / 2), 1, 0, 4, 2, 0, 3, 4*2};
-//int xCoor = (xSize / 2);
-//int yCoor = (ySize / 2);
-//int angleH = 1;
-//int angleV = 0;
-//int shipSizeL = 4;
-//int shipSizeW = 2;
-//int speed = 0;
-//int maxSpeed = 3;
-//int health = shipSizeL*shipSizeW;
+struct crashedAndType{
+  bool crashed;
+  bool crashedMyShip;
+  Ship selfShip;
+};
 
 int inputLength = 11;
 const int numCoves = 20;
@@ -38,6 +34,18 @@ char char_OtherShip = '#';
 char char_OutBounds = '*';
 char char_Land = '^';
 char char_ShipHead = '@';
+char char_DeadShip = 'x';
+
+Ship MyShip{(xSize / 2), (ySize / 2), 0, -1, 4, 2, 0, 3, 4*2, char_Ship};
+//int xCoor = (xSize / 2);
+//int yCoor = (ySize / 2);
+//int angleH = 1;
+//int angleV = 0;
+//int shipSizeL = 4;
+//int shipSizeW = 2;
+//int speed = 0;
+//int maxSpeed = 3;
+//int health = shipSizeL*shipSizeW;
 
 
 char& getSea(int x, int y){
@@ -78,7 +86,7 @@ void makeOtherShips() {
     tempCoorY = random(0, xSize);
     if (tempCoorY < MyShip.yCoor +5 && tempCoorY > MyShip.yCoor-5)
     {tempCoorY = 0;}//FIGURE OUT BETTER SOLUTION LATER
-    otherShips[i] = Ship{tempCoorX, tempCoorY, 1, 0, 4, 2, 0, 3, 4*2};
+    otherShips[i] = Ship{tempCoorX, tempCoorY, 1, 0, 3, 1, 0, 3, 2, char_OtherShip};
   }  
 }
 
@@ -106,7 +114,7 @@ void drawCoves(){
 }
 
 template<typename Fn, typename T>
-T accessShip(Ship theShip, Fn toRunFunc, T& stateHolder) {
+void accessShip(Ship theShip, Fn toRunFunc, T& stateHolder) {
   int offsetX = 0;
   int offsetY = 0;
   for (int i = 0; i < theShip.shipSizeW; ++i) {
@@ -114,29 +122,31 @@ T accessShip(Ship theShip, Fn toRunFunc, T& stateHolder) {
     offsetY = 0;
     offsetX += i*theShip.angleV*-1;
     offsetY += i*theShip.angleH;
+    if (i!=0&&theShip.angleV<0 && theShip.angleH>0) {offsetY+=i*theShip.angleV;}
+    if (i!=0&&theShip.angleV<0 && theShip.angleH<0) {offsetY+=i*theShip.angleV*-1;}
+    if (i!=0&&theShip.angleV>0 && theShip.angleH>0) {offsetY+=i*theShip.angleV*-1;}
+    if (i!=0&&theShip.angleV>0 && theShip.angleH<0) {offsetY+=i*theShip.angleV;}
     for (int j = 0; j < theShip.shipSizeL; ++j) {
       toRunFunc(theShip.xCoor+offsetX,theShip.yCoor+offsetY, stateHolder);
-      //Serial.println(stateHolder);
       offsetX +=theShip.angleH;
       offsetY +=theShip.angleV;
     }
   }
-  return stateHolder;
+  //return stateHolder;
 }
 
-void drawFrame(Ship theShip, bool isOther = false) {
+void drawFrame(Ship theShip, char symbol = char_Ship) {
   int throwAway = 0;
   accessShip(theShip, 
-    [isOther](int X, int Y, int&){
-      if (!isOther){ getSea(X,Y) = char_Ship;}
-      else { getSea(X,Y) = char_OtherShip;}
+    [symbol](int X, int Y, int&){
+      getSea(X,Y) = symbol;
     }
     , throwAway);
 }
 
 void initDrawOtherShips(){
   for (int i{0}; i< numCoves; ++i) {
-    drawFrame(otherShips[i], true);
+    drawFrame(otherShips[i], char_OtherShip);
   } 
 }
 void cleanFrame(Ship theShip) {
@@ -172,15 +182,17 @@ char* getCommand() {
   }
 }
 void updateAngle(Ship& theShip, int newH, int newV){
-  bool realCrashed = false;
-  bool& crashed = realCrashed;
   Ship tempShip = theShip;
+  crashedAndType crashed{false, false, tempShip};
+
+  
   tempShip.angleH = newH;
   tempShip.angleV = newV;
   accessShip(tempShip, checkCrashedHelper, crashed);
   
-  if (crashed){
+  if (crashed.crashed){
     theShip.health -=1;
+    if (crashed.crashedMyShip) {MyShip.health-=1;}
   }else {
     theShip.angleH = newH;
     theShip.angleV = newV;
@@ -207,64 +219,64 @@ void processCommand(char* input, Ship& theShip){
 }
 
 
-
-void checkCrashedHelper(int newX, int newY, bool& crashed){
-  if (newX >= xSize || newX <= 0 || newY >= ySize || newY <= 0) { crashed = true;}
-  if (getSea(newX,newY) != char_SteadySea) {crashed = true;}
-  if (getSea(newX,newY) == char_Ship) {MyShip.health-=1;Serial.println("You got hit");}//really bad fix
-  //Serial.println(getSea(newX,newY));
+void checkCrashedHelper(int newX, int newY, crashedAndType& crashed){
+  if (newX >= xSize || newX <= 0 || newY >= ySize || newY <= 0) { crashed.crashed = true;}//Serial.println("Hit world boarder");}
+  if (getSea(newX,newY) != char_SteadySea&&getSea(newX,newY) != crashed.selfShip.selfSymbol) 
+  {
+    crashed.crashed = true;//Serial.println("You crashed");
+    if (getSea(newX,newY) == char_Ship) {crashed.crashedMyShip = true;Serial.println("You got hit");}//{MyShip.health-=1;Serial.println("You got hit");}//really bad fix
+  }
 }
 
 void updateShips(Ship& theShip){
   int tempX = theShip.xCoor;
   int tempY = theShip.yCoor;
-  //Serial.println(angleH);
-  //Serial.println(angleV);
-  //Serial.println(xCoor);
-  //Serial.println(yCoor);
   
   for (int s = 0; s < theShip.speed; ++s){
     tempX += theShip.angleH;
     tempY += theShip.angleV;
-    
-    bool realCrashed = false;
-    bool& crashed = realCrashed;
+
     Ship tempShip = theShip;
+    crashedAndType crashed{false, false, tempShip};
+
+    
     tempShip.xCoor = tempX;
     tempShip.yCoor = tempY;
     accessShip(tempShip, checkCrashedHelper, crashed);
-    //Serial.println(crashed);
     
-    if (crashed){
+    if (crashed.crashed){
       theShip.health -=1;
+      if (crashed.crashedMyShip) {MyShip.health-=1;}
     }else {
       theShip.xCoor = tempX;
       theShip.yCoor = tempY;
     }
   }
 }
+
+//I dont want the ships drawing themselves until the printSea() command, but that would likely be bug prone
 void otherShipAI(Ship& theShip){
-  cleanFrame(theShip);
-  if (abs(MyShip.xCoor-theShip.xCoor)<20&&abs(MyShip.yCoor-theShip.yCoor)<20){
-    if (MyShip.xCoor-theShip.xCoor<0 && theShip.angleH!=-1&& theShip.angleV!=0){
-      processCommand("left", theShip);
-    } else if (MyShip.xCoor-theShip.xCoor>0 && theShip.angleH!=1&& theShip.angleV!=0){
-      processCommand("right", theShip);
-    } else if (MyShip.yCoor-theShip.yCoor<0 && theShip.angleV!=-1&& theShip.angleH!=0){
-      processCommand("up", theShip);
-    } else if (MyShip.yCoor-theShip.yCoor>0 && theShip.angleV!=1&& theShip.angleH!=0){
-      processCommand("down", theShip);
-    } else {processCommand("faster", theShip);}
-  } else{processCommand("slower", theShip);}
-  updateShips(theShip);
-  drawFrame(theShip, true);
+  if (theShip.health>0){
+    cleanFrame(theShip);
+    if (abs(MyShip.xCoor-theShip.xCoor)<20&&abs(MyShip.yCoor-theShip.yCoor)<20){
+      if (MyShip.xCoor-theShip.xCoor<0 && theShip.angleH!=-1&& theShip.angleV!=0){
+        processCommand("left", theShip);
+      } else if (MyShip.xCoor-theShip.xCoor>0 && theShip.angleH!=1&& theShip.angleV!=0){
+        processCommand("right", theShip);
+      } else if (MyShip.yCoor-theShip.yCoor<0 && theShip.angleV!=-1&& theShip.angleH!=0){
+        processCommand("up", theShip);
+      } else if (MyShip.yCoor-theShip.yCoor>0 && theShip.angleV!=1&& theShip.angleH!=0){
+        processCommand("down", theShip);
+      } else {processCommand("faster", theShip);}
+    } else{processCommand("slower", theShip);}
+    updateShips(theShip);
+    drawFrame(theShip, char_OtherShip);
+  } else drawFrame(theShip, char_DeadShip);
 }
 
 void setup() {
   Serial.begin(250000);
   vTaskDelay(1000 / portTICK_PERIOD_MS);
-  randomSeed(5); //Want same layout each time for debug
-  //seed set is not working?
   makeSea();
   makeCoves();
   drawCoves();
@@ -280,7 +292,6 @@ void setup() {
   drawFrame(MyShip);
   printSea();
   vTaskDelay(1000 / portTICK_PERIOD_MS);
-  //Serial.println("Finished");
 
 }
 
@@ -298,8 +309,7 @@ void loop() {
     for (int i = 0; i < numCoves; ++i){
       otherShipAI(otherShips[i]);
       
-    }// getting hit does not hard MyShip, and there is no way right now
-    //to check if the other ships hit MyShip
+    }
     if (MyShip.health<=0){Serial.println("The Ship died!");}
   }
   else {}
