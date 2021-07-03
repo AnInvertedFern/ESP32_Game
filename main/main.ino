@@ -3,7 +3,7 @@ const int ySize = 100;
 int screenSize = 16;//screen size is actually twice as big
 
 SemaphoreHandle_t AccessSeaMutex = xSemaphoreCreateMutex();
-char* sea = (char*) pvPortMalloc(xSize*ySize*sizeof(char));
+char sea [xSize*ySize];
 
 struct Ship {
   int xCoor;
@@ -26,8 +26,8 @@ struct crashedAndType{
 
 int inputLength = 11;
 const int numCoves = 70;
-int* covesX = (int*) pvPortMalloc(numCoves*sizeof(int));
-int* covesY = (int*) pvPortMalloc(numCoves*sizeof(int));
+int covesX[numCoves];
+int covesY[numCoves];
 struct Ship otherShips[numCoves];
 
 char char_SteadySea = '~';
@@ -40,16 +40,7 @@ char char_DeadShip = 'x';
 char char_DeadMyShip = '.';
 char char_PrintBoarder = ':';
 
-Ship MyShip{(xSize / 2), (ySize / 2), 0, -1, 4, 2, 0, 3, 4*2, char_Ship};
-//int xCoor = (xSize / 2);
-//int yCoor = (ySize / 2);
-//int angleH = 1;
-//int angleV = 0;
-//int shipSizeL = 4;
-//int shipSizeW = 2;
-//int speed = 0;
-//int maxSpeed = 3;
-//int health = shipSizeL*shipSizeW;
+Ship MyShip{(xSize / 2), (ySize / 2), 0, -1, 4, 2, 0, 3, 20, char_Ship};
 
 
 SemaphoreHandle_t SerialOutMutex = xSemaphoreCreateMutex();
@@ -110,13 +101,13 @@ void makeCoves() {
     tempCoor = random(0, xSize);
     if (tempCoor > MyShip.xCoor +5 || tempCoor < MyShip.xCoor-5)
     covesX[i] = tempCoor;
-    else covesX[i] = 0;//FIGURE OUT BETTER SOLUTION LATER
+    else covesX[i] = 0;//Not a great solution, but it works
   }
   for (int i{0}; i< numCoves; ++i) {
     tempCoor = random(0, xSize);
     if (tempCoor > MyShip.yCoor +5 || tempCoor < MyShip.yCoor-5)
     covesY[i] = tempCoor;
-    else covesY[i] = 0;//FIGURE OUT BETTER SOLUTION LATER
+    else covesY[i] = 0;//Not a great solution, but it works
   }
 }
 void makeOtherShips() {
@@ -125,11 +116,11 @@ void makeOtherShips() {
   for (int i{0}; i< numCoves; ++i) {
     tempCoorX = random(0, xSize);
     if (tempCoorX < MyShip.xCoor +5 && tempCoorX > MyShip.xCoor-5)
-    {tempCoorX = 0;}//FIGURE OUT BETTER SOLUTION LATER
+    {tempCoorX = 0;}//Not a great solution, but it works
     
     tempCoorY = random(0, xSize);
     if (tempCoorY < MyShip.yCoor +5 && tempCoorY > MyShip.yCoor-5)
-    {tempCoorY = 0;}//FIGURE OUT BETTER SOLUTION LATER
+    {tempCoorY = 0;}//Not a great solution, but it works
     otherShips[i] = Ship{tempCoorX, tempCoorY, 1, 0, 3, 1, 0, 1, 2, char_OtherShip};
   }  
 }
@@ -216,8 +207,6 @@ void getCommand(void *pvParameters) {
   uint8_t index = 0;
 
   if (makeNewInput && uxSemaphoreGetCount(inputNotReadSemaphore)==1) {
-    //Serial.println("here");
-    //char* input = new char[inputLength];
     input = (char*) pvPortMalloc(inputLength*sizeof(char));
     memset(input, 0, inputLength);
     makeNewInput=false;
@@ -265,13 +254,6 @@ void updateAngle(Ship& theShip, int newH, int newV){//changing angles does not c
   }
 }
 void processCommand(char* input, Ship& theShip){
-//  Serial.println(input[0]);
-//  Serial.println(input[1]);
-//  Serial.println(input[2]);
-//  Serial.println(input[3]);
-//  Serial.println(input[4]=='\n');
-//  Serial.println(input[5]=='\n');
-//  Serial.println(strcmp(input, "left"));
   int tempH = theShip.angleH;
   int tempV = theShip.angleV;
   if (strcmp(input, "down") == 0){
@@ -293,11 +275,11 @@ void processCommand(char* input, Ship& theShip){
 
 
 void checkCrashedHelper(int newX, int newY, crashedAndType& crashed){
-  if (newX >= xSize || newX <= 0 || newY >= ySize || newY <= 0) { crashed.crashed = true;}//Serial.println("Hit world boarder");}
+  if (newX >= xSize || newX <= 0 || newY >= ySize || newY <= 0) { crashed.crashed = true;}
   if (getSea(newX,newY) != char_SteadySea&&getSea(newX,newY) != crashed.selfShip.selfSymbol) 
   {
-    crashed.crashed = true;//Serial.println("You crashed");
-    if (getSea(newX,newY) == char_Ship) {crashed.crashedMyShip = true;}//{MyShip.health-=1;Serial.println("You got hit");}//really bad fix
+    crashed.crashed = true;
+    if (getSea(newX,newY) == char_Ship) {crashed.crashedMyShip = true;}
   }
 }
 
@@ -354,7 +336,7 @@ void otherShipAI(Ship& theShip){
 }
 
 SemaphoreHandle_t myShipMovedSem = xSemaphoreCreateBinary();
-void runOtherShipAIs(void *pvParameters){//triggers stack canary   fixed
+void runOtherShipAIs(void *pvParameters){
   while(1){
     if (uxSemaphoreGetCount(myShipMovedSem)==0){
       for (int i = 0; i < numCoves; ++i){
@@ -372,17 +354,36 @@ void restartOnDelay(void* pvParameters){
   xSemaphoreTake(SerialOutMutex, portMAX_DELAY);
   Serial.println("Restarting Game");
   xSemaphoreGive(SerialOutMutex);
-      
-  //Serial.println("Restarting Game");
+  
   ESP.restart();
 }
 void makeGetCommandTask(TimerHandle_t xTimer){
   xTaskCreatePinnedToCore(getCommand, "get_command", 1024, NULL, 4, NULL, tskNO_AFFINITY);
 }
-
+static const int led_pin = LED_BUILTIN;
+int critHealth = 3;
+void blinkHealthLED(void* pvParameters){
+  while(1){
+    if(getMyShipHealth()>critHealth) {
+      digitalWrite(led_pin, HIGH);
+      vTaskDelay((getMyShipHealth()*200) / portTICK_PERIOD_MS);
+      digitalWrite(led_pin, LOW);
+      vTaskDelay((getMyShipHealth()*500) / portTICK_PERIOD_MS);
+    } else if (getMyShipHealth()<=critHealth&&getMyShipHealth()>0) {
+      xSemaphoreTake(SerialOutMutex, portMAX_DELAY);
+      Serial.println("Health Low!");
+      xSemaphoreGive(SerialOutMutex);
+      digitalWrite(led_pin, HIGH);
+      vTaskDelay(100 / portTICK_PERIOD_MS);
+      digitalWrite(led_pin, LOW);
+      vTaskDelay(500 / portTICK_PERIOD_MS);
+    }
+  }
+}
 void setup() {
   Serial.begin(250000);
   vTaskDelay(1000 / portTICK_PERIOD_MS);
+  pinMode(led_pin, OUTPUT);
   xSemaphoreGive(inputNotReadSemaphore);
   xSemaphoreGive(AccessSeaMutex);
   xSemaphoreGive(AccessMyShipHealthMutex);
@@ -395,29 +396,20 @@ void setup() {
   makeOtherShips();
   initDrawOtherShips();
   drawFrame(MyShip);
-  //Serial.println("here");
   printSea();
+  Serial.println("This is a game where you control a ship and dodge islands and other ships.");
+  Serial.println("Use \'up\' to turn up, \'down\' to turn down, \'left\' to turn left, \'right\' to turn right.");
+  Serial.println("Use \'faster\' to speed up, and \'slower\' to slow down.");
+  vTaskDelay(10000 / portTICK_PERIOD_MS);
   
-//  xTaskCreatePinnedToCore(getCommand, "get_command", 1024, NULL, 1, NULL, tskNO_AFFINITY);
-//  vTaskDelay(5000 / portTICK_PERIOD_MS);
-//  if (uxSemaphoreGetCount(inputNotReadSemaphore)==0){
-//    processCommand(input, MyShip); 
-//    vPortFree((void*)input);
-//    xSemaphoreGive(inputNotReadSemaphore);
-////  }
-//  cleanFrame(MyShip);
-//  updateShips(MyShip);
-//  xSemaphoreTake(myShipMovedSem, (TickType_t) 10);
-//  drawFrame(MyShip);
-//  printSea();
   TimerHandle_t inputTimer = xTimerCreate("make_get_command_task", 500 / portTICK_PERIOD_MS, pdTRUE, (void *)0, makeGetCommandTask);
   if (inputTimer == NULL) {
     ESP.restart();
   } else {
-    //Serial.println("here");
     xTimerStart(inputTimer, portMAX_DELAY);
   }
   xTaskCreatePinnedToCore(runOtherShipAIs, "run_other_ship_AIs", 5024, NULL, 1, NULL, tskNO_AFFINITY);
+  xTaskCreatePinnedToCore(blinkHealthLED, "blink_health_lED", 1024, NULL, 2, NULL, tskNO_AFFINITY);
 
 }
 
@@ -425,11 +417,8 @@ void setup() {
 
 void loop() {
   if (getMyShipHealth()>0){
-    //xTaskCreatePinnedToCore(getCommand, "get_command", 1024, NULL, 4, NULL, tskNO_AFFINITY);
     Ship tempShip = MyShip;
     if (uxSemaphoreGetCount(inputNotReadSemaphore)==0){
-      //Serial.println("got command");
-      //Serial.println(input);
       processCommand(input, MyShip); 
       vPortFree((void*)input);
       xSemaphoreGive(inputNotReadSemaphore);
@@ -448,18 +437,6 @@ void loop() {
     drawFrame(MyShip, char_DeadMyShip);
     xTaskCreatePinnedToCore(restartOnDelay, "restart_on_delay", 1024, NULL, 1, NULL, tskNO_AFFINITY);
   }
-  //}
-  //else {}
   vTaskDelay(1000 / portTICK_PERIOD_MS);
   
-  
-
-  
-  // It wont let me free my variables, it just corrupts my heap
-  //probably cause theyre global
-  //FIX LATER
-  //or because this is a loop, im too tired
-  //vPortFree((void*)covesX);
-  //vPortFree((void*)covesY);
-  //vPortFree((void*)sea);
 }
