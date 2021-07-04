@@ -1,11 +1,24 @@
+SemaphoreHandle_t AccessSeaMutex = xSemaphoreCreateMutex();
+SemaphoreHandle_t SerialOutMutex = xSemaphoreCreateMutex();
+SemaphoreHandle_t AccessMyShipHealthMutex = xSemaphoreCreateMutex();
+SemaphoreHandle_t AccessOtherShipHealthMutex = xSemaphoreCreateMutex();
+SemaphoreHandle_t PrintSeaMutex = xSemaphoreCreateMutex();
+SemaphoreHandle_t inputNotReadSemaphore = xSemaphoreCreateBinary();
+SemaphoreHandle_t CannonArrayMutex = xSemaphoreCreateMutex();
+SemaphoreHandle_t myShipMovedSem = xSemaphoreCreateBinary();
+SemaphoreHandle_t myShipMovedBallsSem = xSemaphoreCreateBinary();
+SemaphoreHandle_t NumBallsMutex = xSemaphoreCreateMutex();
+
 const int xSize = 100;
 const int ySize = 100;
 int screenSize = 25;//screen size is actually twice as big
 
-SemaphoreHandle_t AccessSeaMutex = xSemaphoreCreateMutex();
+const int led_pin = LED_BUILTIN;
+int critHealth = 3;
+char* input;
+int inputLength = 11;
+
 char sea [xSize*ySize];
-//SemaphoreHandle_t AccessIdsMutex = xSemaphoreCreateMutex();
-//Use AccessSeaMutex for both the sea matrix and ids matrix
 int ids [xSize*ySize];
 
 struct Ship {
@@ -31,7 +44,6 @@ struct crashedAndType{
   Ship* crashedOtherShip;
 };
 
-int inputLength = 11;
 const int numCoves = 50;
 int covesX[numCoves];
 int covesY[numCoves];
@@ -46,24 +58,19 @@ char char_Ship = '=';
 char char_OtherShip = '#';
 char char_OutBounds = '*';
 char char_Land = '^';
-//char char_ShipHead = '@';
 char char_DeadShip = 'x';
 char char_DeadMyShip = '.';
 char char_PrintBoarder = ':';
 char char_CannonBall = '0';
 
 Ship nullShip{-1, -1, -3, -3, -1, -1, -1, -1, -1, '\n', -1, -1, -1};
-
-Ship MyShip{(xSize / 2), (ySize / 2), 0, -1, 4, 2, 0, 3, 20, char_Ship, 1, 0, 0};
+Ship MyShip{(xSize / 2), (ySize / 2), 0, -1, 4, 2, 0, 3, 8, char_Ship, 1, 0, 0};
 int steadySeaID = 0;
 int myShipID = 1;
 //Then increment 1 for all cove ids
 //Then increment 1 for all other ships ids
 //Then increment 1 for all cannon ball ids (the ids are not reused after ball death)
 
-SemaphoreHandle_t SerialOutMutex = xSemaphoreCreateMutex();
-
-SemaphoreHandle_t AccessMyShipHealthMutex = xSemaphoreCreateMutex();
 void incMyShipHealth(){
   xSemaphoreTake(AccessMyShipHealthMutex, portMAX_DELAY);
   MyShip.health +=1;
@@ -92,7 +99,6 @@ int getMyShipHealth(){
   return temp;
 }
 
-SemaphoreHandle_t AccessOtherShipHealthMutex = xSemaphoreCreateMutex();
 void incOtherShipHealth(Ship& otherShip){
   xSemaphoreTake(AccessOtherShipHealthMutex, portMAX_DELAY);
   otherShip.health +=1;
@@ -172,6 +178,7 @@ void makeOtherShips() {
 
 void printSea() {
   xSemaphoreTake(SerialOutMutex, portMAX_DELAY);
+  xSemaphoreTake(PrintSeaMutex, portMAX_DELAY);
   for (int i = 0; i < 2*screenSize+2; ++i) {Serial.print(char_PrintBoarder);}
   Serial.println();
   for (int col = MyShip.yCoor - screenSize; col < MyShip.yCoor + screenSize; ++col) {
@@ -179,8 +186,6 @@ void printSea() {
     for (int row = MyShip.xCoor - screenSize; row < MyShip.xCoor + screenSize; ++row) {
       if (row < xSize && row > 0 && col < ySize && col > 0) {
         Serial.print(getSea(row,col));
-        //Serial.print('0'+getId(row,col));
-        //Serial.print('|');
       } else {
         Serial.print(char_OutBounds);
       }
@@ -190,6 +195,7 @@ void printSea() {
   }
   for (int i = 0; i < 2*screenSize+2; ++i) {Serial.print(char_PrintBoarder);}
   Serial.println();
+  xSemaphoreGive(PrintSeaMutex);
   xSemaphoreGive(SerialOutMutex);
 }
 void drawCoves(){
@@ -207,7 +213,6 @@ void accessShip(Ship theShip, Fn toRunFunc, T& stateHolder) {
   int offsetX = 0;
   int offsetY = 0;
   for (int i = 0; i < theShip.shipSizeW; ++i) {
-    //Serial.println(theShip.selfSymbol);
     offsetX = 0;
     offsetY = 0;
     offsetX += i*theShip.angleV*-1;
@@ -217,8 +222,6 @@ void accessShip(Ship theShip, Fn toRunFunc, T& stateHolder) {
     if (i!=0&&theShip.angleV>0 && theShip.angleH>0) {offsetY+=i*theShip.angleV*-1;}
     if (i!=0&&theShip.angleV>0 && theShip.angleH<0) {offsetY+=i*theShip.angleV;}
     for (int j = 0; j < theShip.shipSizeL; ++j) {
-      //Serial.println(theShip.selfSymbol);
-      //Serial.println(theShip.xCoor+offsetX);
       toRunFunc(theShip.xCoor+offsetX,theShip.yCoor+offsetY, stateHolder);
       offsetX +=theShip.angleH;
       offsetY +=theShip.angleV;
@@ -228,12 +231,9 @@ void accessShip(Ship theShip, Fn toRunFunc, T& stateHolder) {
 }
 
 void drawFrame(Ship theShip, char symbol = char_Ship) {
-  //Serial.println(theShip.selfSymbol);
-  //Serial.println(theShip.id);
   int throwAway = 0;
   accessShip(theShip, 
     [symbol, theShip](int X, int Y, int&){
-      //Serial.println(symbol);
       setSea(X,Y, symbol,theShip.id);
     }
     , throwAway);
@@ -252,8 +252,6 @@ void cleanFrame(Ship theShip) {
     }
     , throwAway);
 }
-static char* input;
-SemaphoreHandle_t inputNotReadSemaphore = xSemaphoreCreateBinary();
 void getCommand(void *pvParameters) {
   static bool makeNewInput = true;
   char c;
@@ -270,8 +268,6 @@ void getCommand(void *pvParameters) {
       c = Serial.read();
   
       if (c == '\n'|| index >= inputLength) {
-        //Serial.print("newinput:");
-        //Serial.println(index);
         input[index] = '\0';
         xSemaphoreTake(inputNotReadSemaphore, (TickType_t) 10);
         makeNewInput = true;
@@ -285,9 +281,9 @@ void getCommand(void *pvParameters) {
   vTaskDelete(NULL);
 }
 
-SemaphoreHandle_t CannonArrayMutex = xSemaphoreCreateMutex();
-void spawnCannonBall(Ship& theShip, bool isLeft){//, int portNum = 2, int shotAngle = NULL){
-  int portNum = isLeft ? theShip.currPortCan++ : theShip.currStarCan++;  //this might not be thread safe?,  but nothing else should update or access this?
+//SemaphoreHandle_t NumBallCount = xSemaphoreCreateCounting((UBaseType_t) maxNumBalls, (UBaseType_t 0);
+void spawnCannonBall(Ship& theShip, bool isLeft){
+  int portNum = isLeft ? theShip.currPortCan++ : theShip.currStarCan++;
   if (theShip.currPortCan>=theShip.shipSizeL){theShip.currPortCan = 0;}
   if (theShip.currStarCan>=theShip.shipSizeL){theShip.currStarCan = 0;}
   if (numOfBalls < maxNumBalls){
@@ -314,19 +310,16 @@ void spawnCannonBall(Ship& theShip, bool isLeft){//, int portNum = 2, int shotAn
     }
     
     xSemaphoreTake(CannonArrayMutex, portMAX_DELAY);
-    int openSlot = -1;//If the function got past the if statment, there should be a open slot
+    int openSlot = -1;//If the function got past the inital if statment, there should be a open slot
     for (int i = 0; i < maxNumBalls; ++i){ if (cannonBallShips[i].id == nullShip.id) {openSlot=i;} }
-    
-    //Serial.println(openSlot);
-    //vTaskDelay(1000 / portTICK_PERIOD_MS);
-    
-    cannonBallShips[openSlot]=Ship{newXCoor, newYCoor, newHAngle, newVAngle, 1, 1, 1, 1, 1, char_CannonBall,  1+numCoves+numCoves+numOfBallsCreated+1, 0, 0};
+        
+    cannonBallShips[openSlot]=Ship{newXCoor, newYCoor, newHAngle, newVAngle, 1, 1, 2, 4, 1, char_CannonBall,  1+numCoves+numCoves+numOfBallsCreated+1, 0, 0};
+    xSemaphoreTake(NumBallsMutex, portMAX_DELAY);
     numOfBalls +=1;
+    xSemaphoreGive(NumBallsMutex);
+    //xSemaphoreGive(NumBallCount);
     numOfBallsCreated+=1;
     xSemaphoreGive(CannonArrayMutex);
-
-    
-    //drawFrame(cannonBallShips[openSlot], char_CannonBall);//REMOVE LATER IS FOR TESTING
     
   } else {
     xSemaphoreTake(SerialOutMutex, portMAX_DELAY);
@@ -338,8 +331,7 @@ void spawnCannonBall(Ship& theShip, bool isLeft){//, int portNum = 2, int shotAn
 }
 void updateAngle(Ship& theShip, int newH, int newV){
   Ship tempShip = theShip;
-  //Ship copyNullShip = nullShip;
-  crashedAndType crashed{false, false, tempShip, nullptr};//copyNullShip};
+  crashedAndType crashed{false, false, tempShip, nullptr};
 
   
   tempShip.angleH = newH;
@@ -354,18 +346,8 @@ void updateAngle(Ship& theShip, int newH, int newV){
       Serial.println("You got hit");
       xSemaphoreGive(SerialOutMutex);
     }
-    //Serial.println(crashed.crashedOtherShip.id != nullShip.id);
-    //Serial.println(crashed.crashedOtherShip.id);
-    //Serial.println(nullShip.id);
-    if (crashed.crashedOtherShip != nullptr){//nullShip.id) {
+    if (crashed.crashedOtherShip != nullptr){
       decOtherShipHealth(*crashed.crashedOtherShip);
-      //xSemaphoreTake(SerialOutMutex, portMAX_DELAY);
-      //Serial.print("Hit another ship. Hit Ship: ");
-      //Serial.println((*crashed.crashedOtherShip).id);
-      //Serial.println(crashed.crashedOtherShip.xCoor);
-      //Serial.println(crashed.crashedOtherShip.yCoor);
-      //Serial.println((*crashed.crashedOtherShip).health);
-      //xSemaphoreGive(SerialOutMutex);
     }
   }else {
     theShip.angleH = newH;
@@ -400,19 +382,14 @@ void processCommand(char* input, Ship& theShip){
 
 void checkCrashedHelper(int newX, int newY, crashedAndType& crashed){
   if (newX >= xSize || newX <= 0 || newY >= ySize || newY <= 0) { crashed.crashed = true;}
+  //Use if you don't want other ships to collide with each other
   //if (getSea(newX,newY) != char_SteadySea&&getSea(newX,newY) != crashed.selfShip.selfSymbol) 
+  //Prevents other ships from going through each other
   if (getSea(newX,newY) != char_SteadySea&&getId(newX,newY) != crashed.selfShip.id) 
   {
     crashed.crashed = true;
     if (getId(newX,newY) > 1+numCoves) {
       crashed.crashedOtherShip = &otherShips[getId(newX,newY)-numCoves-1-1];
-      //Serial.println("hits");
-      //Serial.println(getId(newX,newY));
-      //Serial.println(crashed.crashedOtherShip.id);
-      //crashed.crashedOtherShip.health = -1;
-      //Serial.println(crashed.crashedOtherShip.health);
-      //Serial.println(otherShips[getId(newX,newY)-numCoves-1-1].health);
-      //Serial.println("hats");
     }
     if (getSea(newX,newY) == char_Ship) {crashed.crashedMyShip = true;}
   }
@@ -427,8 +404,7 @@ void updateShips(Ship& theShip){
     tempY += theShip.angleV;
 
     Ship tempShip = theShip;
-    //Ship copyNullShip = nullShip;
-    crashedAndType crashed{false, false, tempShip, nullptr};//copyNullShip};
+    crashedAndType crashed{false, false, tempShip, nullptr};
 
     
     tempShip.xCoor = tempX;
@@ -443,18 +419,8 @@ void updateShips(Ship& theShip){
         Serial.println("You got hit");
         xSemaphoreGive(SerialOutMutex);
       }
-      //Serial.println(crashed.crashedOtherShip.id != nullShip.id);
-      //Serial.println(crashed.crashedOtherShip.id);
-      //Serial.println(nullShip.id);
-      if (crashed.crashedOtherShip != nullptr){//nullShip.id) {
+      if (crashed.crashedOtherShip != nullptr){
         decOtherShipHealth(*crashed.crashedOtherShip);
-        //xSemaphoreTake(SerialOutMutex, portMAX_DELAY);
-        //Serial.print("Hit another ship. Hit Ship: ");
-        //Serial.println((*crashed.crashedOtherShip).id);
-        //Serial.println(crashed.crashedOtherShip.xCoor);
-        //Serial.println(crashed.crashedOtherShip.yCoor);
-        //Serial.println((*crashed.crashedOtherShip).health);
-        //xSemaphoreGive(SerialOutMutex);
       }
     }else {
       theShip.xCoor = tempX;
@@ -463,7 +429,6 @@ void updateShips(Ship& theShip){
   }
 }
 int AIVisionDis = 20;
-//I dont want the ships drawing themselves until the printSea() command, but that would likely be bug prone
 void otherShipAI(Ship& theShip){
   if (theShip.health>0){
     Ship copyShip = theShip;
@@ -478,23 +443,21 @@ void otherShipAI(Ship& theShip){
         processCommand("down", theShip);
       } else {processCommand("faster", theShip);}
     } else{processCommand("slower", theShip);}
-    cleanFrame(copyShip);//this might cause a minor race condition that causes the other ships to sometimes disappear for a frame
-    updateShips(theShip);//but it is not worth making this many function calls a critical zone?
-    drawFrame(theShip, char_OtherShip);//or maybe it is?
+    xSemaphoreTake(PrintSeaMutex, portMAX_DELAY);
+    cleanFrame(copyShip);
+    updateShips(theShip);
+    drawFrame(theShip, char_OtherShip);
+    xSemaphoreGive(PrintSeaMutex);
   } else drawFrame(theShip, char_DeadShip);
 }
 
-SemaphoreHandle_t myShipMovedSem = xSemaphoreCreateBinary();
 void runOtherShipAIs(void *pvParameters){
   while(1){
-    if (uxSemaphoreGetCount(myShipMovedSem)==0){
+    xSemaphoreTake(myShipMovedSem, portMAX_DELAY);
       for (int i = 0; i < numCoves; ++i){
         otherShipAI(otherShips[i]);
       }
-    }
-    xSemaphoreGive(myShipMovedSem);
     vTaskDelay(300 / portTICK_PERIOD_MS);
-    //vTaskDelete(NULL);
   }
 }
 
@@ -509,8 +472,6 @@ void restartOnDelay(void* pvParameters){
 void makeGetCommandTask(TimerHandle_t xTimer){
   xTaskCreatePinnedToCore(getCommand, "get_command", 1024, NULL, 4, NULL, tskNO_AFFINITY);
 }
-static const int led_pin = LED_BUILTIN;
-int critHealth = 3;
 void blinkHealthLED(void* pvParameters){
   while(1){
     if(getMyShipHealth()>critHealth) {
@@ -532,30 +493,31 @@ void blinkHealthLED(void* pvParameters){
   }
 }
 
-SemaphoreHandle_t myShipMovedBallsSem = xSemaphoreCreateBinary();
 void runCannonBalls(void *pvParameters){
   while(1){
-    if (numOfBalls>0 && uxSemaphoreGetCount(myShipMovedBallsSem)==0){
-      
+    xSemaphoreTake(myShipMovedBallsSem, portMAX_DELAY);
+    if (numOfBalls>0) {
       for (int i = 0; i < maxNumBalls; ++i){
+        xSemaphoreTake(CannonArrayMutex, portMAX_DELAY);
         if (cannonBallShips[i].id != nullShip.id){
-          xSemaphoreTake(CannonArrayMutex, portMAX_DELAY);
           if(cannonBallShips[i].health>0){
-            cleanFrame(cannonBallShips[i]);//this might cause a minor race condition that causes the other ships to sometimes disappear for a frame
-            updateShips(cannonBallShips[i]);//but it is not worth making this many function calls a critical zone?
-            drawFrame(cannonBallShips[i], char_CannonBall);//or maybe it is?
+            xSemaphoreTake(PrintSeaMutex, portMAX_DELAY);
+            cleanFrame(cannonBallShips[i]);
+            updateShips(cannonBallShips[i]);
+            drawFrame(cannonBallShips[i], char_CannonBall);
+            xSemaphoreGive(PrintSeaMutex);
           } else {
-          drawFrame(cannonBallShips[i], char_SteadySea);
-          numOfBalls-=1;
-          cannonBallShips[i] = nullShip;
+            drawFrame(cannonBallShips[i], char_SteadySea);
+            xSemaphoreTake(NumBallsMutex, portMAX_DELAY);
+            numOfBalls-=1;
+            xSemaphoreGive(NumBallsMutex);
+            cannonBallShips[i] = nullShip;
           }
-          xSemaphoreGive(CannonArrayMutex);
         }
+        xSemaphoreGive(CannonArrayMutex);
       }
     }
-    xSemaphoreGive(myShipMovedBallsSem);
     vTaskDelay(200 / portTICK_PERIOD_MS);
-    //vTaskDelete(NULL);
   }
 }
 
@@ -566,9 +528,7 @@ void setup() {
   xSemaphoreGive(inputNotReadSemaphore);
   xSemaphoreGive(AccessSeaMutex);
   xSemaphoreGive(AccessMyShipHealthMutex);
-  xSemaphoreGive(myShipMovedSem);
   xSemaphoreGive(SerialOutMutex);
-  xSemaphoreGive(myShipMovedBallsSem);
   for (int i = 0; i < maxNumBalls; ++i){ cannonBallShips[i] = nullShip;}
   
   makeSea();
@@ -577,14 +537,12 @@ void setup() {
   makeOtherShips();
   initDrawOtherShips();
   drawFrame(MyShip);
-  printSea();
 
-//  spawnCannonBall(MyShip, true, 0, 2);
-//  //Serial.println(cannonBallShips[0].xCoor);
-//  //Serial.println(cannonBallShips[0].yCoor);
-//  //Serial.println(cannonBallShips[0].selfSymbol);
-//  drawFrame(cannonBallShips[0], char_CannonBall);
-//  printSea();
+  Serial.print('<');
+  for (int i = 0; i < (int)(screenSize*2+2)*1.3; ++i){ Serial.print('=');}
+  Serial.println('>');
+  
+  printSea();
   
   Serial.println("This is a game where you control a ship and dodge islands and other ships.");
   Serial.println("Use \'up\' to turn up, \'down\' to turn down, \'left\' to turn left, \'right\' to turn right.");
@@ -610,6 +568,9 @@ void setup() {
 
 
 void loop() {
+  Serial.print('<');
+  for (int i = 0; i < (int)(screenSize*2+2)*1.3; ++i){ Serial.print('=');}
+  Serial.println('>');
   if (getMyShipHealth()>0){
     Ship tempShip = MyShip;
     if (uxSemaphoreGetCount(inputNotReadSemaphore)==0){
@@ -622,12 +583,9 @@ void loop() {
     drawFrame(MyShip);
   }
   
-//  cleanFrame(cannonBallShips[0]);
-//  updateShips(cannonBallShips[0]);
-//  drawFrame(cannonBallShips[0], char_CannonBall);
   
-  xSemaphoreTake(myShipMovedSem, (TickType_t) 10);
-  xSemaphoreTake(myShipMovedBallsSem, (TickType_t) 10);
+  xSemaphoreGive(myShipMovedSem);
+  xSemaphoreGive(myShipMovedBallsSem);
   printSea();
   if (getMyShipHealth()<=0){
     
